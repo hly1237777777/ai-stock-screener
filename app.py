@@ -85,4 +85,4 @@ def analyze_stock(ticker, vol_multiplier, min_health, min_upside, detect_oversol
             'Low': data['Low']
         })
 
-        df['5VMA'] = df['Volume'].
+df['5VMA'] = df['Volume'].rolling(window=5).mean()
