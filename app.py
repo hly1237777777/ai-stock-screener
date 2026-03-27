@@ -124,14 +124,15 @@ def analyze_stock(ticker, vol_multiplier, min_health, min_upside, detect_oversol
         # 判斷突破與量能
         is_vol_breakout = today['Volume'] >= (yesterday['5VMA'] * vol_multiplier)
         
-        # 箱型突破條件：今日收盤突破箱頂，且箱型寬度 < 20%
-        is_box_breakout = (today['Close'] > today['Box_High_20']) and (today['Box_Width'] < 0.20)
+        # 【微調參數以提高出表率】
+        # 箱型突破條件：今日收盤突破箱頂，且箱型寬度 < 25% (原 0.20)
+        is_box_breakout = (today['Close'] > today['Box_High_20']) and (today['Box_Width'] < 0.25)
         
-        # VCP突破條件：近期極度壓縮 (<12%) 且今日逼近或突破上軌
-        is_vcp_breakout = (today['Min_BW_10'] < 0.12) and (today['Close'] >= (yesterday['Upper_Band'] * 0.98))
+        # VCP突破條件：近期極度壓縮 (<15%，原0.12) 且今日逼近或突破上軌 (>0.96，原0.98)
+        is_vcp_breakout = (today['Min_BW_10'] < 0.15) and (today['Close'] >= (yesterday['Upper_Band'] * 0.96))
 
-        # 超賣條件：RSI(14) 小於等於 30
-        is_oversold = today['RSI_14'] <= 30
+        # 超賣條件：RSI(14) 小於等於 35 (原 30)
+        is_oversold = today['RSI_14'] <= 35
 
         tech_pattern = None
         if is_box_breakout and is_vol_breakout:
@@ -204,6 +205,7 @@ def analyze_stock(ticker, vol_multiplier, min_health, min_upside, detect_oversol
 def main():
     st.set_page_config(page_title="AI 量化動能與價值海選引擎", page_icon="🧠", layout="wide")
     
+    # 增加手機版 RWD CSS 樣式
     st.markdown("""
         <style>
         .stButton>button { background-color: #3b82f6; color: white; font-weight: bold; border-radius: 8px; font-size: 16px;}
@@ -233,7 +235,7 @@ def main():
         st.header("⚙️ 第一層：技術動能篩選")
         vol_multiplier = st.slider("突破均量倍數 (預設 1.2倍)", min_value=1.0, max_value=3.0, value=1.2, step=0.1, 
                                    help="突破當日成交量需大於過去5日均量的多少倍？防範假突破的核心。")
-        detect_oversold = st.checkbox("🔍 同時尋找「錯殺超跌」標的", value=True, help="納入 RSI(14) 小於 30，且基本面依然優良的深度價值股。")
+        detect_oversold = st.checkbox("🔍 同時尋找「錯殺超跌」標的", value=True, help="納入 RSI(14) 小於 35，且基本面依然優良的深度價值股。")
         
         st.header("🛡️ 第二層：基本面護城河")
         min_health = st.slider("最低財務穩健度 (1-5分)", min_value=1, max_value=5, value=3,
@@ -321,7 +323,7 @@ def main():
 <p style="color: #e2e8f0; font-size: 15px; margin: 6px 0;"><strong>公允價值 (目標價):</strong> <span style="color: #94a3b8; margin-left: 8px;">{currency}{res['fair_value']}</span></p>
 <div style="background-color: #0f172a; padding: 10px; border-radius: 6px; margin-top: 15px; margin-bottom: 10px;">
 <p style="color: #94a3b8; font-size: 12px; margin: 0 0 6px 0;">📊 技術指標狀態</p>
-<p style="color: #e2e8f0; font-size: 13px; margin: 4px 0;"><strong>RSI (14):</strong> <span style="color: {'#ef4444' if res['rsi'] <= 30 else '#34d399'}; font-weight: bold;">{res['rsi']}</span> (<=30為超賣)</p>
+<p style="color: #e2e8f0; font-size: 13px; margin: 4px 0;"><strong>RSI (14):</strong> <span style="color: {'#ef4444' if res['rsi'] <= 35 else '#34d399'}; font-weight: bold;">{res['rsi']}</span> (<=35為超賣)</p>
 <p style="color: #e2e8f0; font-size: 13px; margin: 4px 0;"><strong>爆量倍數:</strong> {res['volume_ratio']} 倍</p>
 </div>
 <div class="reason-box">
