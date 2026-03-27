@@ -1,157 +1,312 @@
+import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import streamlit as st
-from datetime import datetime
+import concurrent.futures
+import time
 
-# --- 頁面配置：手機端建議使用 centered 佈局 ---
-st.set_page_config(page_title="AI 量化指揮中心", layout="centered")
-
-# 股票名稱映射表 (已新增 LLY, BA, TTD)
-NAME_MAP = {
-    # 台股
-    "3711.TW": "日月光投控", "2059.TW": "川湖", "2308.TW": "台達電", 
-    "2330.TW": "台積電", "2454.TW": "聯發科", "2317.TW": "鴻海", 
-    "3231.TW": "緯創", "2327.TW": "國巨", "2458.TW": "義隆", 
-    "6176.TW": "瑞儀", "1708.TW": "東鹼", "2404.TW": "漢唐", 
-    "6239.TW": "力成", "3037.TW": "欣興", "2408.TW": "南亞科", "3491.TW": "昇達科",
-    # 日股
-    "7733.T": "奧林巴斯", "1540.T": "純金信託", "9432.T": "日本電信電話", 
-    "8058.T": "三菱商事", "6501.T": "日立製作所", "4063.T": "信越化學", 
-    "1542.T": "純銀信託", "6857.T": "愛德萬測試", "7011.T": "三菱重工", 
-    "2644.T": "日股半導體ETF", "8001.T": "伊藤忠商事", "7203.T": "豐田汽車", 
-    "7974.T": "任天堂", "1699.T": "野村原油ETF", "1321.T": "日經225ETF",
-    # 美股與 ETF (包含最新加入的標的)
-    "LLY": "禮來", "BA": "波音", "TTD": "The Trade Desk",
-    "NVDA": "輝達", "MRVL": "邁威爾科技", "COHR": "科希倫", "GOOGL": "谷歌", 
-    "PLUG": "普拉格能源", "NBIS": "Nebius Group", "URNM": "Sprott鈾礦ETF", 
-    "PYPL": "PayPal", "MU": "美光科技", "ETN": "伊頓科技", "POW": "日昇新能",
-    "LMT": "洛克希德馬丁", "NOC": "諾格", "GLW": "康寧", "GEV": "GE Vernova", 
-    "VRT": "維諦技術", "PLTR": "帕蘭提爾", "RKLB": "火箭實驗室", "AAOI": "應用光電", 
-    "TNDM": "Tandem醫療", "DAC": "德納斯", "ONDS": "昂達斯", "TSM": "台積電ADR", 
-    "AAPL": "蘋果", "MSFT": "微軟", "SPY": "標普500ETF",
-    "SOFI": "SoFi科技", "DIS": "迪士尼", "BIDU": "百度", 
-    "XOP": "標普油氣開採ETF", "VDE": "先鋒能源ETF", "XLE": "能源板塊SPDR",
-    "DOG": "道指反向ETF", "PSQ": "納指反向ETF",
-    "SGOL": "abrdn實體黃金ETF", "UGL": "2倍做多黃金ETF"
+# ==========================================
+# 動態掃描池 (Dynamic Watchlist Pool)
+# ==========================================
+DEFAULT_MARKET_POOL = {
+    "US": [
+        "AAPL", "MSFT", "NVDA", "TSLA", "AMD", "META", "AMZN", "GOOGL", "AVGO", "PLTR", 
+        "SMCI", "ARM", "MU", "INTC", "QCOM", "NFLX", "ADBE", "CRM", "CRWD", "PANW",
+        "UBER", "PYPL", "SQ", "COIN", "HOOD", "RIVN", "LCID", "SNOW", "DDOG", "NET",
+        "NOW", "INTU", "CSCO", "TXN", "AMAT", "LRCX", "KLAC", "MRVL", "MCHP", "NXPI",
+        "ON", "ASML", "CDNS", "SNPS", "FTNT", "MDB", "ZS", "OKTA", "CFLT", "DOCN",
+        "MSTR", "MARA", "RIOT", "SOFI", "AFRM", "ROKU", "PINS", "SNAP", "SPOT", "SHOP",
+        "MELI", "SE", "BABA", "PDD", "JD", "BIDU", "NTES", "TTD", "RBLX", "U", "APP",
+        "DOCU", "ZM", "TWLO", "RNG", "PATH", "AI", "PLUG", "ENPH", "SEDG", "FSLR",
+        "RUN", "ALB", "LTHM", "SQM", "V", "MA", "AXP", "JPM", "BAC", "C", "WFC", "GS",
+        "MS", "BLK", "SPGI", "MCO", "UNH", "JNJ", "LLY", "MRK", "ABBV", "PFE", "TMO",
+        "DHR", "ABT", "UNP", "HON", "BA", "CAT", "DE", "LMT", "RTX", "NOC", "GD",
+        "DIS", "CMCSA", "CHTR", "TMUS", "VZ", "T", "NEE", "DUK", "SO",
+        "VRT", "GEV", "TNDM", "SPY"
+    ],
+    "TW": [
+        "2330.TW", "2454.TW", "2317.TW", "2382.TW", "3231.TW", "2308.TW", "2881.TW", 
+        "2356.TW", "2603.TW", "3443.TW", "3034.TW", "2303.TW", "3661.TW", "3293.TW",
+        "3037.TW", "2379.TW", "1519.TW", "2301.TW", "2353.TW", "2324.TW", "2412.TW",
+        "2882.TW", "2891.TW", "2886.TW", "2884.TW", "1301.TW", "1303.TW", "2002.TW",
+        "1216.TW", "2892.TW", "2885.TW", "2883.TW", "2880.TW", "5871.TW", "2887.TW",
+        "5880.TW", "2890.TW", "1101.TW", "1102.TW", "2912.TW", "2615.TW", "2609.TW",
+        "2618.TW", "2610.TW", "2395.TW", "2408.TW", "3481.TW", "2409.TW", "6415.TW",
+        "3529.TW", "5269.TW", "3008.TW", "3169.TW", "2383.TW", "3017.TW", "2357.TW",
+        "3044.TW", "3036.TW", "2376.TW", "6669.TW", "3533.TW", "2313.TW", "2368.TW",
+        "6239.TW", "8046.TW", "3042.TW", "3014.TW", "2344.TW", "2449.TW", "8299.TW",
+        "3105.TW", "8069.TW", "5347.TW", "6488.TW", "6147.TW", "3260.TW", "3324.TW",
+        "3653.TW", "6274.TW", "2352.TW", "2439.TW", "2345.TW", "2455.TW", "2314.TW"
+    ],
+    "JP": [
+        "4063.T", "8035.T", "9984.T", "7203.T", "6861.T", "6758.T", "6920.T", "6501.T",
+        "8058.T", "8306.T", "9432.T", "7974.T", "4568.T", "6098.T", "6902.T", "6857.T",
+        "6146.T", "6954.T", "6762.T", "6594.T", "6723.T", "6702.T", "7751.T", "7733.T",
+        "6981.T", "6753.T", "6503.T", "6502.T", "8031.T", "8001.T", "8002.T", "8053.T",
+        "8316.T", "8411.T", "8766.T", "8750.T", "8591.T", "9433.T", "9434.T", "9983.T",
+        "4661.T", "3382.T", "9022.T", "9020.T", "4502.T", "4519.T", "4523.T", "4503.T",
+        "2502.T", "2802.T", "2914.T", "4452.T", "4911.T", "5108.T", "5401.T", "6301.T",
+        "6367.T", "7267.T", "7269.T", "7270.T", "1925.T", "1928.T", "4543.T", "4578.T",
+        "4901.T", "5713.T", "6971.T", "7741.T"
+    ]
 }
 
-class TacticalScanner:
-    def __init__(self, symbols):
-        self.symbols = symbols
+def calculate_health_score(info):
+    """
+    計算財務穩健度分數 (1~5分) - 完全保留原版邏輯
+    """
+    score = 1 # 基礎分 1 分
+    
+    if info.get('returnOnEquity', 0) > 0.10: score += 1
+    if info.get('currentRatio', 0) > 1.2: score += 1
+    if info.get('debtToEquity', 100) < 100: score += 1
+    if info.get('revenueGrowth', 0) > 0.05: score += 1
+        
+    return score
 
-    def get_tradingview_link(self, symbol):
-        """生成 TradingView 連結 (支援跨市場轉換)"""
-        tv_symbol = symbol
-        if ".TW" in symbol:
-            tv_symbol = f"TWSE:{symbol.replace('.TW', '')}"
-        elif ".T" in symbol:
-            tv_symbol = f"TSE:{symbol.replace('.T', '')}"
-        elif "-USD" in symbol:
-            tv_symbol = f"BINANCE:{symbol.replace('-USD', 'USDT')}"
-        return f"https://www.tradingview.com/chart/?symbol={tv_symbol}"
-
-    def fetch_data(self, symbol):
-        try:
-            ticker = yf.Ticker(symbol)
-            df = ticker.history(period="6mo")
-            return df if not df.empty and len(df) >= 50 else None
-        except:
+def analyze_stock(ticker, vol_multiplier, min_health, min_upside, detect_oversold):
+    """
+    兩階段量化引擎：完全保留原版穩定運算邏輯
+    """
+    try:
+        # ==========================================
+        # 階段一：技術面掃描
+        # ==========================================
+        stock_obj = yf.Ticker(ticker)
+        data = stock_obj.history(period="3mo")
+        
+        if data.empty or len(data) < 25:
             return None
 
-    def calculate_indicators(self, df):
-        last_close = float(df['Close'].iloc[-1])
+        df = pd.DataFrame({
+            'Close': data['Close'], 
+            'Volume': data['Volume'], 
+            'High': data['High'], 
+            'Low': data['Low']
+        })
+
+        df['5VMA'] = df['Volume'].rolling(window=5).mean()
         
-        # 均線
-        ema20 = df['Close'].ewm(span=20, adjust=False).mean()
-        ema50 = df['Close'].ewm(span=50, adjust=False).mean()
+        df['Box_High_20'] = df['High'].shift(1).rolling(window=20).max()
+        df['Box_Low_20'] = df['Low'].shift(1).rolling(window=20).min()
+        df['Box_Width'] = (df['Box_High_20'] - df['Box_Low_20']) / df['Box_Low_20']
         
-        # MACD (12, 26, 9)
-        exp1 = df['Close'].ewm(span=12, adjust=False).mean()
-        exp2 = df['Close'].ewm(span=26, adjust=False).mean()
-        macd = exp1 - exp2
-        signal = macd.ewm(span=9, adjust=False).mean()
-        hist = macd - signal
+        df['20MA'] = df['Close'].rolling(window=20).mean()
+        df['STD'] = df['Close'].rolling(window=20).std()
+        df['Upper_Band'] = df['20MA'] + (2 * df['STD'])
+        df['Lower_Band'] = df['20MA'] - (2 * df['STD'])
+        df['Bandwidth'] = (df['Upper_Band'] - df['Lower_Band']) / df['20MA']
+        df['Min_BW_10'] = df['Bandwidth'].rolling(window=10).min()
+
+        delta = df['Close'].diff()
+        gain = delta.clip(lower=0).ewm(alpha=1/14, min_periods=14, adjust=False).mean()
+        loss = -delta.clip(upper=0).ewm(alpha=1/14, min_periods=14, adjust=False).mean()
+        rs = gain / loss
+        df['RSI_14'] = 100 - (100 / (1 + rs))
+
+        today = df.iloc[-1]
+        yesterday = df.iloc[-2]
+
+        is_vol_breakout = today['Volume'] >= (yesterday['5VMA'] * vol_multiplier)
+        is_box_breakout = (today['Close'] > today['Box_High_20']) and (today['Box_Width'] < 0.20)
+        is_vcp_breakout = (today['Min_BW_10'] < 0.12) and (today['Close'] >= (yesterday['Upper_Band'] * 0.98))
+        is_oversold = today['RSI_14'] <= 30
+
+        tech_pattern = None
+        if is_box_breakout and is_vol_breakout:
+            tech_pattern = "箱型帶量突破 (Box Breakout)"
+        elif is_vcp_breakout and is_vol_breakout:
+            tech_pattern = "VCP 收斂突破 (Squeeze Breakout)"
+        elif detect_oversold and is_oversold:
+            tech_pattern = "深度價值 (好股錯殺)"
+
+        if not tech_pattern:
+            return None
+
+        # ==========================================
+        # 階段二：基本面過濾
+        # ==========================================
+        info = stock_obj.info
         
-        # KD (9, 3)
-        low_min = df['Low'].rolling(window=9).min()
-        high_max = df['High'].rolling(window=9).max()
-        k = 100 * (df['Close'] - low_min) / (high_max - low_min)
-        d = k.rolling(window=3).mean()
+        health_score = calculate_health_score(info)
+        if health_score < min_health:
+            return None 
+            
+        current_price = today['Close']
+        target_price = info.get('targetMeanPrice', current_price) 
         
-        # CCI (14)
-        tp = (df['High'] + df['Low'] + df['Close']) / 3
-        cci = (tp - tp.rolling(14).mean()) / (0.015 * tp.rolling(14).std())
+        if target_price > 0 and current_price > 0:
+            upside_pct = ((target_price - current_price) / current_price) * 100
+        else:
+            upside_pct = 0.0
+            
+        if upside_pct < min_upside:
+            return None 
+
+        # ==========================================
+        # 整理結果
+        # ==========================================
+        name = info.get('shortName', ticker)
+        change_pct = ((today['Close'] - yesterday['Close']) / yesterday['Close']) * 100
         
-        # Bias (20EMA)
-        bias_20 = float((last_close - ema20.iloc[-1]) / ema20.iloc[-1] * 100)
-        
-        # 統一輸出，並使用 float() 確保資料純粹性
+        if "錯殺" in tech_pattern:
+            reason_text = f"【技術面】{tech_pattern}，RSI(14) 降至 {round(today['RSI_14'], 1)} 極度超賣區，短期恐慌情緒達標。"
+        else:
+            reason_text = f"【技術面】{tech_pattern}，成交量為 5日均量的 {round(today['Volume'] / yesterday['5VMA'], 1)} 倍，主力資金明顯介入。"
+            
+        reason_text += f"<br><br>【基本面】財務穩健度達 {health_score} 分。目前股價低於機構公允價值，潛在上漲空間達 {round(upside_pct, 1)}%。"
+
         return {
-            "Close": last_close, 
-            "EMA20": float(ema20.iloc[-1]), 
-            "EMA50": float(ema50.iloc[-1]),
-            "Hist": float(hist.iloc[-1]), 
-            "K": float(k.iloc[-1]), 
-            "D": float(d.iloc[-1]), 
-            "CCI": float(cci.iloc[-1]),
-            "Bias_20": bias_20
+            'ticker': ticker,
+            'name': name,
+            'price': round(current_price, 2),
+            'change_pct': round(change_pct, 2),
+            'pattern': tech_pattern,
+            'health': health_score,
+            'upside': round(upside_pct, 2),
+            'fair_value': target_price,
+            'rsi': round(today['RSI_14'], 1),
+            'volume_ratio': round(today['Volume'] / yesterday['5VMA'], 2),
+            'bandwidth': round(today['Bandwidth'] * 100, 2),
+            'reason': reason_text,
+            'url': f"https://www.tradingview.com/symbols/{ticker.replace('.TW', '').replace('.T', '')}/"
         }
 
-    def generate_detailed_reason(self, last):
-        close = last['Close']
-        if close > last['EMA20'] and last['Hist'] > 0 and 0 < last['Bias_20'] < 5:
-            return "ADD-ON", f"🔥 趨勢向上：站穩 20EMA，乖離率僅 {last['Bias_20']:.2f}%，MACD 柱體持續擴張。"
-        elif last['K'] < 30 and last['K'] > last['D'] and last['CCI'] > -100:
-            return "EXECUTE", f"🎯 底部訊號：KD 低檔交叉(K={last['K']:.1f})，CCI 指標由超賣區反彈。"
-        elif close < last['EMA50'] or (last['K'] > 80 and last['Hist'] < 0):
-            if close < last['EMA50']:
-                return "EVACUATE", f"⚠️ 趨勢破壞：跌破中期均線 50EMA，請注意回撤風險。"
-            else:
-                return "EVACUATE", f"⚠️ 技術背離：高檔超買但動能柱已萎縮。"
-        return "WAIT", "⏳ 監控中：價格在盤整區間，指標暫無明顯偏向。"
+    except Exception as e:
+        return None
 
-# --- UI 介面 ---
-st.title("🛡️ 全球量化戰術中心")
-st.caption(f"數據最後更新: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+def main():
+    st.set_page_config(page_title="AI 量化動能與價值海選引擎", page_icon="🧠", layout="wide")
+    
+    # 保留手機版響應式 RWD 樣式設計
+    st.markdown("""
+        <style>
+        .stButton>button { background-color: #3b82f6; color: white; font-weight: bold; border-radius: 8px; font-size: 16px;}
+        .stButton>button:hover { background-color: #2563eb; }
+        .metric-card { 
+            background-color: #1e293b; padding: 24px; border-radius: 12px; 
+            border: 1px solid #475569; border-top: 5px solid #3b82f6;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3); min-height: 250px; margin-bottom: 20px;
+        }
+        .tag-tech { background-color: #047857; color: #d1fae5; padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: bold;}
+        .tag-health { background-color: #4338ca; color: #e0e7ff; padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: bold;}
+        .reason-box { background-color: #0f172a; border-left: 4px solid #3b82f6; padding: 12px; margin-top: 16px; border-radius: 4px;}
+        
+        @media (max-width: 640px) {
+            .metric-card h2 { font-size: 1.5rem !important; }
+            .tag-tech, .tag-health { font-size: 10px !important; }
+            .metric-card p { font-size: 13px !important; }
+        }
+        </style>
+    """, unsafe_allow_html=True)
 
-with st.sidebar:
-    st.header("📋 股池配置")
-    market_filter = st.multiselect("選擇市場", ["台股", "美股", "日股"], default=["美股", "台股", "日股"])
-    run_scan = st.button("🚀 開始全量化掃描", use_container_width=True)
+    st.markdown("## 🧠 融合 ProPicks AI 邏輯與技術突破的量化引擎")
+    st.caption("結合「箱型/VCP 帶量突破」與「財務穩健度/公允價值」的雙重漏斗篩選系統")
+    st.divider()
 
-if run_scan:
-    targets = []
-    if "台股" in market_filter: targets.extend([k for k in NAME_MAP.keys() if ".TW" in k])
-    if "美股" in market_filter: targets.extend([k for k in NAME_MAP.keys() if "." not in k])
-    if "日股" in market_filter: targets.extend([k for k in NAME_MAP.keys() if ".T" in k])
-    
-    scanner = TacticalScanner(targets)
-    results = []
-    
-    progress = st.progress(0)
-    for i, sym in enumerate(targets):
-        df = scanner.fetch_data(sym)
-        if df is not None:
-            last = scanner.calculate_indicators(df)
-            zone, reason = scanner.generate_detailed_reason(last)
-            results.append({
-                "代號": sym, "名稱": NAME_MAP.get(sym, sym),
-                "價格": f"{last['Close']:.2f}", "戰術": zone, "理由": reason,
-                "TV連結": scanner.get_tradingview_link(sym)
-            })
-        progress.progress((i + 1) / len(targets))
-    
-    # 手機版優化佈局：整合圖表按鈕
-    for z_type, z_name, z_color in [("ADD-ON", "🔥 加碼推背區", "blue"), ("EXECUTE", "🎯 進入打擊區", "green"), ("EVACUATE", "⚠️ 風險撤退區", "red")]:
-        subset = [r for r in results if r['戰術'] == z_type]
-        if subset:
-            with st.expander(f"{z_name} ({len(subset)})", expanded=True):
-                for item in subset:
-                    cols = st.columns([3, 1]) 
-                    with cols[0]:
-                        st.write(f"**{item['代號']} {item['名稱']}** | 價格: {item['價格']}")
-                        st.caption(item['理由'])
-                    with cols[1]:
-                        st.link_button("📊 圖表", item['TV連結'], use_container_width=True)
-                    st.divider()
+    with st.sidebar:
+        st.header("⚙️ 第一層：技術動能篩選")
+        # 為提高出表率，預設突破均量微降至 1.1倍
+        vol_multiplier = st.slider("突破均量倍數 (預設 1.1倍)", min_value=1.0, max_value=3.0, value=1.1, step=0.1, 
+                                   help="突破當日成交量需大於過去5日均量的多少倍？防範假突破的核心。")
+        detect_oversold = st.checkbox("🔍 同時尋找「錯殺超跌」標的", value=True, help="納入 RSI(14) 小於 30，且基本面依然優良的深度價值股。")
+        
+        st.header("🛡️ 第二層：基本面護城河")
+        # 為提高出表率，預設穩健度降至 2分
+        min_health = st.slider("最低財務穩健度 (1-5分)", min_value=1, max_value=5, value=2,
+                               help="基於 ROE、流動比率、負債比與營收成長計算。")
+        # 關鍵：預設漲幅設為 0%，避免 yfinance 缺少目標價資料時把股票錯殺
+        min_upside = st.slider("最低潛在上漲空間 (%)", min_value=0, max_value=50, value=0, step=5,
+                               help="股價距離公允價值 (目標價) 的折價空間，確保安全邊際。設定0可保留未提供目標價的強勢股。")
+
+        st.header("🌍 選擇動態掃描池")
+        use_default = st.checkbox("掃描內建美/台/日 280+ 檔權值科技與動能股", value=True)
+        custom_tickers = st.text_area("或自行貼上股票代碼 (以逗號分隔)", placeholder="例如: TSLA, AAPL, 2330.TW")
+        
+        st.divider()
+        run_screener = st.button("🚀 啟動雙核心量化海選", use_container_width=True)
+
+    if run_screener:
+        scan_list = []
+        if use_default:
+            scan_list.extend(DEFAULT_MARKET_POOL["US"] + DEFAULT_MARKET_POOL["TW"] + DEFAULT_MARKET_POOL["JP"])
+        
+        if custom_tickers.strip():
+            custom_list = [t.strip() for t in custom_tickers.split(",") if t.strip()]
+            scan_list.extend(custom_list)
+            
+        scan_list = list(set(scan_list))
+
+        if not scan_list:
+            st.warning("請選擇內建名單或輸入自訂股票代碼。")
+            return
+
+        st.subheader(f"⚡ 正在並行掃描 {len(scan_list)} 檔標的... (將先過濾技術面，再審查財報)")
+        start_time = time.time()
+        
+        final_results = []
+        progress_bar = st.progress(0)
+        
+        # 恢復原版 10 執行緒配置
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            future_to_ticker = {executor.submit(analyze_stock, ticker, vol_multiplier, min_health, min_upside, detect_oversold): ticker for ticker in scan_list}
+            
+            completed = 0
+            for future in concurrent.futures.as_completed(future_to_ticker):
+                result = future.result()
+                if result:
+                    final_results.append(result)
+                completed += 1
+                progress_bar.progress(completed / len(scan_list))
+        
+        end_time = time.time()
+        st.success(f"掃描完成！運算耗時: {round(end_time - start_time, 2)} 秒 | 嚴格篩選後突圍標的：{len(final_results)} 檔")
+        st.divider()
+        
+        if not final_results:
+            st.info("🎯 今日全市場沒有標的能同時通過「技術面真突破」與「基本面高分」的雙重考驗。落實量化紀律，空手也是一種策略。")
+        else:
+            cols = st.columns(3)
+            for i, res in enumerate(final_results):
+                with cols[i % 3]:
+                    if res['ticker'].endswith(".TW"):
+                        currency = "NT$"
+                    elif res['ticker'].endswith(".T"):
+                        currency = "¥"
+                    else:
+                        currency = "$"
+                        
+                    pct_color = "#10b981" if res['change_pct'] > 0 else "#ef4444"
+                    stars = "⭐" * res['health']
+                    
+                    html_content = f"""
+<div class="metric-card">
+<div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px;">
+<h2 style="color: #60a5fa; margin: 0; font-weight: 800;">{res['ticker']}</h2>
+<span class="tag-tech">{res['pattern']}</span>
+</div>
+<p style="color: #cbd5e1; font-size: 15px; margin: 0 0 12px 0;">{res['name']}</p>
+<div style="display: flex; gap: 8px; margin-bottom: 12px;">
+<span class="tag-health">穩健度 {stars}</span>
+<span class="tag-health">潛在漲幅 {res['upside']}%</span>
+</div>
+<hr style="border-color: #475569; margin: 12px 0;">
+<p style="color: #e2e8f0; font-size: 15px; margin: 6px 0;"><strong>最新收盤價:</strong> <span style="font-size: 22px; color: #ffffff; font-weight: bold; margin-left: 8px;">{currency}{res['price']}</span></p>
+<p style="color: #e2e8f0; font-size: 15px; margin: 6px 0;"><strong>今日漲跌幅:</strong> <span style="color: {pct_color}; font-weight: bold; margin-left: 8px;">{res['change_pct']}%</span></p>
+<p style="color: #e2e8f0; font-size: 15px; margin: 6px 0;"><strong>公允價值 (目標價):</strong> <span style="color: #94a3b8; margin-left: 8px;">{currency}{res['fair_value']}</span></p>
+<div style="background-color: #0f172a; padding: 10px; border-radius: 6px; margin-top: 15px; margin-bottom: 10px;">
+<p style="color: #94a3b8; font-size: 12px; margin: 0 0 6px 0;">📊 技術指標狀態</p>
+<p style="color: #e2e8f0; font-size: 13px; margin: 4px 0;"><strong>RSI (14):</strong> <span style="color: {'#ef4444' if res['rsi'] <= 30 else '#34d399'}; font-weight: bold;">{res['rsi']}</span> (<=30為超賣)</p>
+<p style="color: #e2e8f0; font-size: 13px; margin: 4px 0;"><strong>爆量倍數:</strong> {res['volume_ratio']} 倍</p>
+</div>
+<div class="reason-box">
+<p style="color: #94a3b8; font-size: 12px; margin: 0 0 4px 0; font-weight: bold;">💡 AI 雙核心入選原因</p>
+<p style="color: #f8fafc; font-size: 13px; line-height: 1.6; margin: 0;">{res['reason']}</p>
+</div>
+</div>
+"""
+                    st.markdown(html_content, unsafe_allow_html=True)
+                    st.link_button(f"查看 {res['ticker']} 線圖確認支撐", res['url'], use_container_width=True)
+
+if __name__ == "__main__":
+    main()
