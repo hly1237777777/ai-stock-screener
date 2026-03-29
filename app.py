@@ -218,6 +218,47 @@ def analyze_stock(ticker, vol_multiplier, min_health, min_upside, detect_oversol
     except Exception as e:
         return None
 
+def render_stock_card(res):
+    """輔助函式：渲染單一股票卡片 HTML"""
+    if res['ticker'].endswith(".TW"):
+        currency = "NT$"
+    elif res['ticker'].endswith(".T"):
+        currency = "¥"
+    else:
+        currency = "$"
+        
+    pct_color = "#10b981" if res['change_pct'] > 0 else "#ef4444"
+    stars = "⭐" * res['health']
+    
+    html_content = f"""
+<div class="metric-card">
+<div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px;">
+<h2 style="color: #60a5fa; margin: 0; font-weight: 800;">{res['ticker']}</h2>
+<span class="tag-tech">{res['pattern']}</span>
+</div>
+<p style="color: #cbd5e1; font-size: 15px; margin: 0 0 12px 0;">{res['name']}</p>
+<div style="display: flex; gap: 8px; margin-bottom: 12px;">
+<span class="tag-health">穩健度 {stars}</span>
+<span class="tag-health">潛在漲幅 {res['upside']}%</span>
+</div>
+<hr style="border-color: #475569; margin: 12px 0;">
+<p style="color: #e2e8f0; font-size: 15px; margin: 6px 0;"><strong>最新收盤價:</strong> <span style="font-size: 22px; color: #ffffff; font-weight: bold; margin-left: 8px;">{currency}{res['price']}</span></p>
+<p style="color: #e2e8f0; font-size: 15px; margin: 6px 0;"><strong>今日漲跌幅:</strong> <span style="color: {pct_color}; font-weight: bold; margin-left: 8px;">{res['change_pct']}%</span></p>
+<p style="color: #e2e8f0; font-size: 15px; margin: 6px 0;"><strong>公允價值 (目標價):</strong> <span style="color: #94a3b8; margin-left: 8px;">{currency}{res['fair_value']}</span></p>
+<div style="background-color: #0f172a; padding: 10px; border-radius: 6px; margin-top: 15px; margin-bottom: 10px;">
+<p style="color: #94a3b8; font-size: 12px; margin: 0 0 6px 0;">📊 技術指標狀態</p>
+<p style="color: #e2e8f0; font-size: 13px; margin: 4px 0;"><strong>RSI (14):</strong> <span style="color: {'#ef4444' if res['rsi'] <= 30 else '#34d399'}; font-weight: bold;">{res['rsi']}</span> (<=30為超賣)</p>
+<p style="color: #e2e8f0; font-size: 13px; margin: 4px 0;"><strong>爆量倍數:</strong> {res['volume_ratio']} 倍</p>
+</div>
+<div class="reason-box">
+<p style="color: #94a3b8; font-size: 12px; margin: 0 0 4px 0; font-weight: bold;">💡 AI 雙核心入選原因</p>
+<p style="color: #f8fafc; font-size: 13px; line-height: 1.6; margin: 0;">{res['reason']}</p>
+</div>
+</div>
+"""
+    st.markdown(html_content, unsafe_allow_html=True)
+    st.link_button(f"查看 {res['ticker']} 線圖確認支撐", res['url'], use_container_width=True)
+
 def main():
     st.set_page_config(page_title="AI 量化動能與價值海選引擎", page_icon="🧠", layout="wide")
     
@@ -228,11 +269,16 @@ def main():
         .metric-card { 
             background-color: #1e293b; padding: 24px; border-radius: 12px; 
             border: 1px solid #475569; border-top: 5px solid #3b82f6;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3); height: 100%;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3); height: 100%; margin-bottom: 20px;
         }
         .tag-tech { background-color: #047857; color: #d1fae5; padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: bold;}
         .tag-health { background-color: #4338ca; color: #e0e7ff; padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: bold;}
         .reason-box { background-color: #0f172a; border-left: 4px solid #3b82f6; padding: 12px; margin-top: 16px; border-radius: 4px;}
+        @media (max-width: 640px) {
+            .metric-card h2 { font-size: 1.5rem !important; }
+            .tag-tech, .tag-health { font-size: 10px !important; }
+            .metric-card p { font-size: 13px !important; }
+        }
         </style>
     """, unsafe_allow_html=True)
 
@@ -300,49 +346,42 @@ def main():
         if not final_results:
             st.info("🎯 今日全市場沒有標的能同時通過「技術面真突破」與「基本面高分」的雙重考驗。落實量化紀律，空手也是一種策略。")
         else:
-            cols = st.columns(3)
-            for i, res in enumerate(final_results):
-                with cols[i % 3]:
-                    # 修正貨幣符號判斷邏輯：精準判斷「結尾後綴」，避免 TWLO 被誤判為台股
-                    if res['ticker'].endswith(".TW"):
-                        currency = "NT$"
-                    elif res['ticker'].endswith(".T"):
-                        currency = "¥"
-                    else:
-                        currency = "$"
-                        
-                    pct_color = "#10b981" if res['change_pct'] > 0 else "#ef4444"
-                    stars = "⭐" * res['health']
+            # 建立分類清單
+            us_stocks = []
+            tw_stocks = []
+            jp_stocks = []
+            
+            for res in final_results:
+                if res['ticker'].endswith(".TW"):
+                    tw_stocks.append(res)
+                elif res['ticker'].endswith(".T"):
+                    jp_stocks.append(res)
+                else:
+                    us_stocks.append(res)
+            
+            # 建立 左/中/右 三個垂直欄位
+            col_us, col_tw, col_jp = st.columns(3)
+            
+            with col_us:
+                st.subheader(f"🇺🇸 美股 ({len(us_stocks)})")
+                if not us_stocks:
+                    st.caption("無符合條件之標的")
+                for res in us_stocks:
+                    render_stock_card(res)
                     
-                    # 消除縮排與空行，強制以純 HTML 解析避免 Markdown 產生 Code Block
-                    html_content = f"""
-<div class="metric-card">
-<div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px;">
-<h2 style="color: #60a5fa; margin: 0; font-weight: 800;">{res['ticker']}</h2>
-<span class="tag-tech">{res['pattern']}</span>
-</div>
-<p style="color: #cbd5e1; font-size: 15px; margin: 0 0 12px 0;">{res['name']}</p>
-<div style="display: flex; gap: 8px; margin-bottom: 12px;">
-<span class="tag-health">穩健度 {stars}</span>
-<span class="tag-health">潛在漲幅 {res['upside']}%</span>
-</div>
-<hr style="border-color: #475569; margin: 12px 0;">
-<p style="color: #e2e8f0; font-size: 15px; margin: 6px 0;"><strong>最新收盤價:</strong> <span style="font-size: 22px; color: #ffffff; font-weight: bold; margin-left: 8px;">{currency}{res['price']}</span></p>
-<p style="color: #e2e8f0; font-size: 15px; margin: 6px 0;"><strong>今日漲跌幅:</strong> <span style="color: {pct_color}; font-weight: bold; margin-left: 8px;">{res['change_pct']}%</span></p>
-<p style="color: #e2e8f0; font-size: 15px; margin: 6px 0;"><strong>公允價值 (目標價):</strong> <span style="color: #94a3b8; margin-left: 8px;">{currency}{res['fair_value']}</span></p>
-<div style="background-color: #0f172a; padding: 10px; border-radius: 6px; margin-top: 15px; margin-bottom: 10px;">
-<p style="color: #94a3b8; font-size: 12px; margin: 0 0 6px 0;">📊 技術指標狀態</p>
-<p style="color: #e2e8f0; font-size: 13px; margin: 4px 0;"><strong>RSI (14):</strong> <span style="color: {'#ef4444' if res['rsi'] <= 30 else '#34d399'}; font-weight: bold;">{res['rsi']}</span> (<=30為超賣)</p>
-<p style="color: #e2e8f0; font-size: 13px; margin: 4px 0;"><strong>爆量倍數:</strong> {res['volume_ratio']} 倍</p>
-</div>
-<div class="reason-box">
-<p style="color: #94a3b8; font-size: 12px; margin: 0 0 4px 0; font-weight: bold;">💡 AI 雙核心入選原因</p>
-<p style="color: #f8fafc; font-size: 13px; line-height: 1.6; margin: 0;">{res['reason']}</p>
-</div>
-</div>
-"""
-                    st.markdown(html_content, unsafe_allow_html=True)
-                    st.link_button(f"查看 {res['ticker']} 線圖確認支撐", res['url'], use_container_width=True)
+            with col_tw:
+                st.subheader(f"🇹🇼 台股 ({len(tw_stocks)})")
+                if not tw_stocks:
+                    st.caption("無符合條件之標的")
+                for res in tw_stocks:
+                    render_stock_card(res)
+                    
+            with col_jp:
+                st.subheader(f"🇯🇵 日股 ({len(jp_stocks)})")
+                if not jp_stocks:
+                    st.caption("無符合條件之標的")
+                for res in jp_stocks:
+                    render_stock_card(res)
 
 if __name__ == "__main__":
     main()
