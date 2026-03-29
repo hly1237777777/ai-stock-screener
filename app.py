@@ -230,14 +230,23 @@ def render_stock_card(res):
     pct_color = "#10b981" if res['change_pct'] > 0 else "#ef4444"
     stars = "⭐" * res['health']
     
+    # 清理代號並組合專屬 TradingView URL
+    clean_ticker = res['ticker'].replace('.TW', '').replace('.T', '')
+    tv_url = f"https://www.tradingview.com/chart/rJKeTEVy/?symbol={clean_ticker}"
+    
     html_content = f"""
 <div class="metric-card">
-<div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px;">
-<h2 style="color: #60a5fa; margin: 0; font-weight: 800;">{res['ticker']}</h2>
-<span class="tag-tech">{res['pattern']}</span>
+<!-- 頂部區塊：代碼、名稱與右上角按鈕 -->
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+<div style="display: flex; align-items: baseline; gap: 8px;">
+<h2 style="color: #60a5fa; margin: 0; font-weight: 800; font-size: 1.5rem;">{clean_ticker}</h2>
+<span style="color: #e2e8f0; font-size: 1.1rem; font-weight: bold;">{res['name']}</span>
 </div>
-<p style="color: #cbd5e1; font-size: 15px; margin: 0 0 12px 0;">{res['name']}</p>
-<div style="display: flex; gap: 8px; margin-bottom: 12px;">
+<a href="{tv_url}" target="_blank" style="background-color: #2563eb; color: white; padding: 4px 10px; border-radius: 6px; text-decoration: none; font-size: 12px; font-weight: bold; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">📈 TV圖表</a>
+</div>
+<!-- 技術與籌碼標籤 -->
+<div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;">
+<span class="tag-tech">{res['pattern']}</span>
 <span class="tag-health">穩健度 {stars}</span>
 <span class="tag-health">潛在漲幅 {res['upside']}%</span>
 </div>
@@ -257,7 +266,6 @@ def render_stock_card(res):
 </div>
 """
     st.markdown(html_content, unsafe_allow_html=True)
-    st.link_button(f"查看 {res['ticker']} 線圖確認支撐", res['url'], use_container_width=True)
 
 def main():
     st.set_page_config(page_title="AI 量化動能與價值海選引擎", page_icon="🧠", layout="wide")
